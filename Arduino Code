@@ -1,0 +1,494 @@
+#include <Servo.h>
+Servo MotorCodo;  // Crea un objeto de la clase Servo
+Servo MotorMuneca;  // Crea un objeto de la clase Servo
+Servo Pinza;
+   
+ class realMotor { //clase para almacenar los valores de cada MOTOR REALIMENTADO
+public:
+                      // Parámetros del PID
+    double Kp = 0.0;
+    double Ki = 0.0;
+    double Kd = 0.0;
+              double P, I = 0, D;  // Inicializa I y D
+              double output, error, lastInput = 0;  
+              unsigned long lastTime = 0;  
+              
+                      // Parámetros del Hardware
+    int pinPotenciometro;  // Pin para el potenciómetro
+    int entradaA;          // Primer pin de control para el puente H
+    int entradaB;          // Segundo pin de control para el puente H
+    int enable;           // Pin de habilitación para el puente H
+    int minvalpot = 0;     // Valor minimo de lectura del potenciometro
+    int maxvalpot = 1023;  // Valor máximo de lectura del potenciometro
+    int minangpot = 0;
+    int maxangpot = 180;
+    
+                      //Parámetros del control
+    int valorPotenciometro;      
+    int anguloReal;
+    int anguloDeseado;
+    int salidaFinal = 0;
+    int absSalidaFinal = 0;
+ 
+//                        ORDEN CONSTRUCTOR: entradaA, entradaB, enable, pinPotenciometro, Kp, Ki, Kd, minvalpot, maxvalpot, minangpot, maxangpot
+    
+    // Constructor para inicializar todos los pines necesarios
+    realMotor(int _entradaA, int _entradaB, int _enable, int _pinPotenciometro, double _Kp, double _Ki, double _Kd, int _minvalpot, int _maxvalpot, int _minangpot, int _maxangpot)
+    : entradaA(_entradaA), entradaB(_entradaB), enable(_enable), pinPotenciometro(_pinPotenciometro),
+      Kp(_Kp), Ki(_Ki), Kd(_Kd), minvalpot(_minvalpot), maxvalpot(_maxvalpot), minangpot(_minangpot), maxangpot(_maxangpot) {
+        pinMode(pinPotenciometro, INPUT);  // Configura el pin del potenciómetro como entrada
+        pinMode(entradaA, OUTPUT);         // Configura el primer pin de control como salida
+        pinMode(entradaB, OUTPUT);         // Configura el segundo pin de control como salida
+        pinMode(enable, OUTPUT);           // Configura el pin de habilitación como salida
+    }
+
+      void FuncionMotorBase(realMotor& motor){};
+      void FuncionMotorHombro(realMotor& motor){};
+
+    //   Función para manejar el control del motor mediante el puente H
+    void manageMotor() {                                                            // A tener actualizado antes salidaFinal y absSalidaFinal
+      
+        // Control del motor mediante el puente H
+        if (salidaFinal > 0) {
+            digitalWrite(entradaA, HIGH);
+            digitalWrite(entradaB, LOW);
+        } else if (salidaFinal < 0) {
+            digitalWrite(entradaA, LOW);
+            digitalWrite(entradaB, HIGH);
+        } else {
+            digitalWrite(entradaA, LOW);
+            digitalWrite(entradaB, LOW);
+        }
+
+        // Aplicar el ciclo de trabajo correcto
+        analogWrite(enable, absSalidaFinal);                                   //ejecutador
+    }
+};
+const double gravComp_1 = 0.75;  // Compensación por gravedad (TORQUE GENERADO POR LA GRAVEDAD EN FUNCION DEL ANGULO)
+const double torqueMax = 1.47; // Torque máximo del motor en Nm
+
+    class coordBloques {
+public:
+        // Variables para almacenar los ángulos finales del movimiento
+        int CinInvAngBase;
+        int CinInvAngHombro;
+        int CinInvAngCodo;
+        int CinInvAngMuneca;
+    
+        // Constructor para inicializar el objeto
+        coordBloques(int base, int hombro, int codo, int muneca)
+            : CinInvAngBase(base), CinInvAngHombro(hombro), CinInvAngCodo(codo), CinInvAngMuneca(muneca) {}
+    };
+
+
+//                                                       CONSTRUCCION DE OBJETOS:
+// Creación del objeto motorHombro
+// Parámetros: entradaA, entradaB, enable, pinPotenciometro, Kp, Ki, Kd, minvalpot, maxvalpot, minangpot, maxangpot
+realMotor motorHombro(
+    5,       // entradaA: Primer pin de control para el puente H
+    6,       // entradaB: Segundo pin de control para el puente H
+    7,       // enable: Pin de habilitación para el puente H
+    A0,      // pinPotenciometro: Pin para el potenciómetro
+    4.0,     // Kp: Ganancia proporcional
+    0.0,     // Ki: Ganancia integral
+    0.0,     // Kd: Ganancia derivativa
+    100,       // minvalpot: Valor mínimo de lectura del potenciómetro
+    1000,    // maxvalpot: Valor máximo de lectura del potenciómetro
+    -15,       // minangpot: Ángulo mínimo correspondiente al potenciómetro
+    200      // maxangpot: Ángulo máximo correspondiente al potenciómetro
+);
+
+// Creación del objeto motorBase
+// Parámetros: entradaA, entradaB, enable, pinPotenciometro, Kp, Ki, Kd, minvalpot, maxvalpot, minangpot, maxangpot
+realMotor motorBase(
+    4,       // entradaA: Primer pin de control para el puente H
+    3,       // entradaB: Segundo pin de control para el puente H
+    2,       // enable: Pin de habilitación para el puente H
+    A1,      // pinPotenciometro: Pin para el potenciómetro
+    2.0,     // Kp: Ganancia proporcional
+    0.0,     // Ki: Ganancia integral
+    2.0,     // Kd: Ganancia derivativa
+    0,       // minvalpot: Valor mínimo de lectura del potenciómetro
+    1023,    // maxvalpot: Valor máximo de lectura del potenciómetro
+    -105,    // minangpot: Ángulo mínimo correspondiente al potenciómetro
+    90       // maxangpot: Ángulo máximo correspondiente al potenciómetro
+);
+
+//Coordenadas de los bloques que ya hemos trasladado desde MATLAB                   //base, hombro, codo, muñeca
+ /* coordBloques lejosP0(-70, 30, -45, -40);
+  coordBloques lejosP1(-70, 30, -38, -30);
+  coordBloques medioP0(-70, 45, -58, -70);
+  coordBloques medioP1(-70, 80, -65, -60);
+  coordBloques cercaP0(-70, 70, -90, -69);
+  coordBloques cercaP1(-70, 90, -75, -80);*/
+  
+  coordBloques Bloques[] = {
+        {0, 30, 90, 90}, //ORIGEN
+        {-70, 30, -45, -40},  // lejosP0
+        {-70, 45, -58, -70},  // medioP0
+        {-70, 70, -90, -69},  // cercaP0
+        {-70, 30, -38, -30},  // lejosP1
+        {-70, 80, -65, -60},  // medioP1
+        {-70, 90, -75, -80},  // cercaP1
+    };
+  coordBloques ORIGEN (0, 30, 90, 90);
+  coordBloques recogerBloque(85, 30, -50, -20);
+
+
+//                                                          Constantes y variables globales
+
+const unsigned long updateInterval = 8000;  // Intervalo de actualización en milisegundos
+bool MovimientoBloque = false; //variable que activa la cinematica del movimiento
+bool cogiendoBloque = false, dejandoBloque = false;
+bool comunicacionMatlab = false;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+int CinInvAngBase;
+int CinInvAngHombro;
+int CinInvAngCodo;
+int CinInvAngMuneca;
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+int indiceBloque = 0;
+unsigned long tiempoInicio = 0;
+
+void setup() {
+    Serial.begin(9600);
+    MotorCodo.attach(8);  // Asigna el pin 9 a la señal de control del servo
+    MotorMuneca.attach(10);  // Asigna el pin 9 a la señal de control del servo
+    Pinza.attach(11); // Vincula el servo al pin 11
+    
+     tiempoInicio = millis();
+     coordBloques ORIGEN (0, 30, 90, 90);
+     coordBloques recogerBloque(85, 30, -50, -20);
+}
+
+void loop() {
+///////////////////////////////////////////////////////////////////////////////////////////////////
+          //COMUNICACION CON MATLAB
+          comunicacionMatlab=true;
+          
+    if (comunicacionMatlab){ //Por aqui recibiriamos a traves de un bucle la informacion desde MATLAB 
+
+    
+      if (millis() - tiempoInicio > 2000) { //pongo un tiempo de inicializacion de variables
+          
+          // Posicionar en Origen
+          CinInvAngBase = ORIGEN.CinInvAngBase;
+          CinInvAngHombro = ORIGEN.CinInvAngHombro;
+          CinInvAngCodo = ORIGEN.CinInvAngCodo;
+          CinInvAngMuneca = ORIGEN.CinInvAngMuneca;
+          abrirPinza();
+          
+          motorBase.anguloDeseado = CinInvAngBase;
+          motorHombro.anguloDeseado = CinInvAngHombro;
+        };
+      
+     if (millis() - tiempoInicio > 6000) { //5 segundos y se mueve a por un bloque (realmente se situa 30 grados por encima para no chocarse con nada)
+          
+          // Acceder a las variables del objeto actual
+          CinInvAngBase = recogerBloque.CinInvAngBase;
+          CinInvAngHombro = recogerBloque.CinInvAngHombro;
+          CinInvAngCodo = recogerBloque.CinInvAngCodo;
+          CinInvAngMuneca = recogerBloque.CinInvAngMuneca;
+          CinInvAngHombro += 30;
+
+          motorBase.anguloDeseado = CinInvAngBase;
+          motorHombro.anguloDeseado = CinInvAngHombro;
+        };
+  
+      if (millis() - tiempoInicio > 9000) { //3 segundos y se mueve a por un bloque (realmente se situa 30 grados por encima para no chocarse con nada)
+          CinInvAngHombro -= 30;
+
+          motorBase.anguloDeseado = CinInvAngBase;
+          motorHombro.anguloDeseado = CinInvAngHombro;
+        };
+        
+      if (millis() - tiempoInicio > 12000) { //3 segundos y cierra la pinza, luego otros 2 segundos de esper
+          cerrarPinza();
+        };
+
+        if (millis() - tiempoInicio > 14000) { //va a dejar el bloque
+
+          CinInvAngBase = bloques[indiceBloque].CinInvAngBase;
+          CinInvAngHombro = bloques[indiceBloque].CinInvAngHombro;
+          CinInvAngCodo = bloques[indiceBloque].CinInvAngCodo;
+          CinInvAngMuneca = bloques[indiceBloque].CinInvAngMuneca;
+          CinInvAngHombro += 30;
+
+          motorBase.anguloDeseado = CinInvAngBase;
+          motorHombro.anguloDeseado = CinInvAngHombro;
+        };
+        if (millis() - tiempoInicio > 18000) { //4 segundos y se mueve a por un bloque (realmente se situa 30 grados por encima para no chocarse con nada)
+          CinInvAngHombro -= 30;
+
+          motorBase.anguloDeseado = CinInvAngBase;
+          motorHombro.anguloDeseado = CinInvAngHombro;
+        };
+        
+        if (millis() - tiempoInicio > 20000) { //3 segundos y se mueve a por un bloque (realmente se situa 30 grados por encima para no chocarse con nada)
+          cerrarPinza();
+        };
+        
+        if (millis() - tiempoInicio > 22000) { //4 segundos y se mueve a por un bloque (realmente se situa 30 grados por encima para no chocarse con nada)
+          CinInvAngHombro += 30;
+
+          motorBase.anguloDeseado = CinInvAngBase;
+          motorHombro.anguloDeseado = CinInvAngHombro;
+        };
+         if (millis() - tiempoInicio > 25000) { //4 segundos y se mueve a por un bloque (realmente se situa 30 grados por encima para no chocarse con nada)
+          // Incrementar el índice para pasar al siguiente objeto en el próximo ciclo
+                 indiceBloque++;
+                tiempoInicio=millis();
+        };
+      
+
+          // Si el índice es mayor o igual al tamaño del vector, reiniciarlo
+          if (indiceBloque >= sizeof(Bloques) / sizeof(Bloques[0])) {
+              indiceBloque = 0;
+          }
+
+
+
+        
+         FuncionMotorBase(motorBase);
+         FuncionMotorHombro(motorHombro); 
+         updateAngObjetivo_Codo_Muneca(CinInvAngCodo,CinInvAngMuneca);
+         MotorCodo.write(CinInvAngCodo);   // Mueve el servo a la posición inicial (0 grados)
+         MotorMuneca.write(CinInvAngMuneca);   // Mueve el servo a la posición inicial (0 grados)
+    }
+
+                                                                                                //ACTUALIZO MONITOREO
+            actualizarRealimentacion();                                                                   
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+          // MovimientoBloque==true;
+         //cogiendoBloque = true;
+         //dejandoBloque = false;
+/*
+ * 
+ * 
+ 
+      //para activar esta funcion necesito MOVIMIENTO BLOQUE Y TIPO DE MOVIMIENTO (ABRIR CERRAR)
+    if (MovimientoBloque ==true){ //Activo el movimiento tras recibir nuevos angulos de un bloque
+      unsigned long tiempoInicio=0;
+      bool faseInicio = true, faseEstabilizacion = false, faseRealSuperada = false;
+      faseInicio=1;
+          double ErrorInicialBase = updateAngObjetivoBase(CinInvAngBase);    // Llama a la función para actualizar el ángulo objetivo del motorBase
+          double ErrorInicialHombro = updateAngObjetivoHombro(CinInvAngHombro);  // Llama a la función para actualizar el ángulo objetivo del motorHombro
+    
+       if (faseInicio && !faseEstabilizacion && !faseRealSuperada){ 
+           tiempoInicio = millis();
+            while (abs(motorBase.error) < abs(ErrorInicialBase)/5){ //hasta que no llegue a al menos un 20% del error de realimentación no pasa a la siguiente articulacion
+              FuncionMotorBase(motorBase);
+            }
+           /* while (abs(motorHombro.error) < abs(ErrorInicialHombro)/3){ //hasta que no llegue a al menos un 20% del error de realimentación no pasa a la siguiente articulacion
+              FuncionMotorBase(motorBase);
+              FuncionMotorHombro(motorHombro);
+            }
+            faseEstabilizacion = true;
+         
+    }else if(faseInicio && faseEstabilizacion && !faseRealSuperada){
+             FuncionMotorBase(motorBase);
+             FuncionMotorHombro(motorHombro);
+          if (millis() - tiempoInicio >= 2000) {//tiempo suficiente para que se estabilice bien el sistema
+          faseRealSuperada = true;
+         }
+ 
+      }else if(faseInicio && faseEstabilizacion && faseRealSuperada){//Ya hemos alcanzado una buena estabilizacion de los sistemas realimentados 
+      FuncionMotorBase(motorBase);
+      FuncionMotorHombro(motorHombro);
+      updateAngObjetivo_Codo_Muneca(CinInvAngCodo,CinInvAngMuneca);
+      MotorCodo.write(CinInvAngCodo);
+      MotorMuneca.write(CinInvAngMuneca);  
+
+      if (millis() - tiempoInicio >= 4000) {//tiempo suficiente para que haya llegado a las coordenadas
+          if (cogiendoBloque && !dejandoBloque){
+            static unsigned long tiempoPinza = millis();
+            while(millis() - tiempoPinza <= 1000){
+              cerrarPinza(); 
+              FuncionMotorBase(motorBase);
+              FuncionMotorHombro(motorHombro);
+           }
+              cogiendoBloque=false;
+                
+            }else if(!cogiendoBloque && dejandoBloque){
+              static unsigned long tiempoPinza = millis();
+               while(millis() - tiempoPinza <= 1000){
+                  abrirPinza();
+                  FuncionMotorBase(motorBase);
+                  FuncionMotorHombro(motorHombro);   
+                 }
+                 dejandoBloque=false;
+               }
+                  faseInicio = false;
+                  faseEstabilizacion = false;
+                  faseRealSuperada = false;
+         }
+         MovimientoBloque=false;
+      }
+    }
+    */
+     
+
+// Pequeña pausa para estabilizar, ajustable
+//delay(50);
+}
+
+
+
+
+
+void actualizarRealimentacion(){
+          Serial.print("\t");
+          Serial.print(motorBase.anguloDeseado);
+          Serial.print("\t");
+          Serial.print(motorBase.anguloReal);
+          Serial.print("\t");
+          Serial.print(motorBase.output);  
+          Serial.print("\t");
+          
+           Serial.print("\t");
+          Serial.print(motorHombro.anguloDeseado);
+          Serial.print("\t");
+          Serial.print(motorHombro.anguloReal);
+          Serial.print("\t");
+          Serial.println(motorHombro.output); 
+}
+
+void FuncionMotorHombro(realMotor& motor){ //Funcion para controlar al servo                                  DEL HOMBRO
+
+    motor.valorPotenciometro = analogRead(motor.pinPotenciometro);
+    // Lee el valor actual del potenciómetro y conviértelo a grados
+    motor.anguloReal = map(motor.valorPotenciometro, motor.minvalpot, motor.maxvalpot, motor.minangpot, motor.maxangpot); // asignacion de angulos corrigiendo los problemas del sensor
+    
+    // Calcula el error
+    motor.error = motor.anguloDeseado - motor.anguloReal;
+    // Calcula la señal de control del primer lazo (cerrado)
+    motor.output = motor.Kp * motor.error;
+
+    //Añadimos el componente del lazo de realimentación gravitatorio a la salida del sistema
+    double gan_gravit = calcularCompensacionGravedad(motor.anguloReal);
+    double salidaReal= motor.output + gan_gravit;
+
+    // Toma el valor absoluto del output para PWM
+    int absSalidaReal = abs(int(salidaReal));
+    // Limita el valor a un máximo de 255 para la señal PWM
+    absSalidaReal = constrain(absSalidaReal, 0, 255);
+    
+    // Actualiza el valor de salida cada x miliseconds      ->  EN EL OBJETO  <-
+    static unsigned long tiempoactualizacion = 0;
+    if (millis() - tiempoactualizacion >= 30) {
+         motor.salidaFinal=salidaReal;
+         motor.absSalidaFinal=absSalidaReal;
+        tiempoactualizacion = millis();
+    }
+
+
+
+      //APLICO EL OUTPUT AL PUENTE H
+      motor.manageMotor();
+      actualizarRealimentacion();
+}
+
+
+
+
+void FuncionMotorBase(realMotor& motor){ //Funcion para controlar al servo                                          DE LA BASE
+
+    motor.valorPotenciometro = analogRead(motor.pinPotenciometro);
+    // Lee el valor actual del potenciómetro y conviértelo a grados
+    motor.anguloReal = map(motor.valorPotenciometro, motor.minvalpot, motor.maxvalpot, motor.minangpot, motor.maxangpot); // asignacion de angulos corrigiendo los problemas del sensor
+    
+    // Calcula el error
+    motor.error = motor.anguloDeseado - motor.anguloReal;
+    // Calcula la señal de control del primer lazo (cerrado)
+    motor.P = motor.Kp * motor.error;
+
+    // Computar PID como normal
+        unsigned long now = millis();
+        double timeChange = (double)(now - motor.lastTime);
+      
+        if (timeChange >= 50) {  // Intervalo de cálculo, ajusta según necesites
+            // Calcular el término integral
+            motor.I += (motor.Ki * motor.error);
+            motor.I = constrain(motor.I, 0, 255);  // Evita el wind-up del integrador
+            
+            // Calcular el término derivativo
+            motor.D = (motor.anguloReal - motor.lastInput);
+    
+            // Calcular salida PID
+            motor.output = motor.P  - motor.Kd * motor.D; //+motor.I;
+            
+    
+            // Recordar algunos valores para la próxima vez
+            motor.lastInput = motor.anguloReal;
+            motor.lastTime = now;
+        }
+    
+    motor.salidaFinal = motor.output;
+    
+    // Actualiza el valor de salida                             ->  EN EL OBJETO  <-
+    // Toma el valor absoluto del output para PWM
+    motor.absSalidaFinal = abs(int(motor.salidaFinal));
+    
+    //Con esta linea estoy mandando un pulso proporcional al error real
+      motor.absSalidaFinal = map(motor.absSalidaFinal, 0, 100, 0, 200);
+      
+    // Limita el valor a un máximo de 255 para la señal PWM
+    motor.absSalidaFinal = constrain(motor.absSalidaFinal, 0, 255);
+
+      //APLICO EL OUTPUT AL PUENTE H
+      motor.manageMotor();
+      actualizarRealimentacion();
+}
+
+
+
+
+
+
+
+                                      //  Función para calcular la compensación de torque por gravedad
+double calcularCompensacionGravedad(double angulo) {
+    // Convertir grados a radianes
+    double radianes = angulo * (PI / 180.0);
+    double componentegravedad = gravComp_1 * cos(radianes); //calculo el torque con el componente del peso dado el angulo
+    int correcciongravedad = (int)(componentegravedad * (255 / 1.47));
+    
+    // Limitar el valor a rango PWM (-255 a 255)
+    correcciongravedad = constrain(correcciongravedad, -255, 255);
+    
+    return correcciongravedad;
+}
+
+void abrirPinza() {
+  Pinza.write(80); // Mueve el servo a 80 grados (abrir)
+}
+
+void cerrarPinza() {
+  Pinza.write(0); // Mueve el servo a 0 grados (cerrar)
+}
+                                      
+
+/////////////////////////////////////////////////////////////////////////// ACTUALIZAR ANGULOS ////////////////////////////////////////////////////////////
+
+      // Función para actualizar el ángulo objetivo de motorBase
+void updateAngObjetivoBase(){
+    motorBase.anguloDeseado = CinInvAngBase;
+}
+
+// Función para actualizar el ángulo objetivo de motorHombro
+void updateAngObjetivoHombro() {
+  motorHombro.anguloDeseado = CinInvAngHombro;
+}
+
+//Funcion para adaptar los angulos de la cinematica al SR fisico del robot
+void updateAngObjetivo_Codo_Muneca(int AnguloDeseadoCodo,int AnguloDeseadoMuneca){
+    
+    CinInvAngCodo = map(AnguloDeseadoCodo,90,-90,0,180);
+    CinInvAngMuneca=AnguloDeseadoMuneca + 90;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
